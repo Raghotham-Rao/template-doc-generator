@@ -7,6 +7,7 @@ from db.initial_db_load import seed_data_load
 st.set_page_config(layout="wide")
 
 if not os.path.exists(const.DB_PATH):
+    os.makedirs('/'.join(const.DB_PATH.split('/')[:-1]))
     database_setup(const.DB_PATH)
     seed_data_load(const.DB_PATH)
     st.toast('Database setup succesful!', icon=':material/done_outline:')
