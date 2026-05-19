@@ -3,6 +3,9 @@ import re
 import sqlite3
 import pandas as pd
 import const
+from streamlit_tree_select import tree_select
+from utils.data_path import nodes
+import json
 
 
 conn = sqlite3.connect('transport_doc_generator.db')
@@ -23,6 +26,7 @@ def define_html_template_tab():
         fields_cols = st.columns(2)
         template_name = fields_cols[0].text_input(label="Template Name", placeholder="Enter the template name")
         template_description = fields_cols[1].text_input(label="Template Description", placeholder="Add a short description to your template")
+        template_base = st.selectbox(label='Select Doc Base', options=['Shipment', 'Delivery'])
 
         html_content_input = st.text_area(
             label="HTML Content",
@@ -49,8 +53,71 @@ def define_html_template_tab():
     footer_columns = st.columns(7)
 
 
+def show_tabular_col_mapper(flat, template_variables):
+    # only leaf nodes (no children) should be selectable
+    leaf_items = [item for item in flat if not item['has_children']]
+    values = [item['value'] for item in leaf_items]
+    display_map = {}
+    for item in flat:
+        icon = '📦' if item['has_children'] else '🔤'
+        # mat_icon_name = 'data-object' if item['has_children'] else 'text-fields'
+        display_text = f"{icon} {item['value']}"
+        if item['has_children']:
+            display_text = f"{display_text} — not selectable"
+        display_map[item['value']] = display_text
+    
+    header_cols = st.columns([2, 1, 2, 3, 2])
+    header_cols[0].markdown("**Template Variable**")
+    header_cols[1].markdown("**Value Type**")
+    header_cols[2].markdown("**Source Table**")
+    header_cols[3].markdown("**Source Column / Value**")
+    header_cols[4].markdown("**Additional Details**")
+
+    for template_variable in template_variables:
+        cols = st.columns([2, 1, 2, 3, 2])
+        cols[0].markdown(f'##### `{template_variable}`', unsafe_allow_html=True)
+
+        value_type = cols[1].selectbox(label='Value Type', options=['Derived', 'Static Value', 'Formula'], key=f'{template_variable}_value_type', label_visibility='collapsed')
+
+        if value_type == 'Static Value':
+            variable_value = cols[2].text_input(label='value', key=f'{template_variable}_source_selection', label_visibility="collapsed")
+            formatted_variable_value = f'*{variable_value}*'
+        elif value_type == 'Derived':
+            variable_value = cols[2].selectbox(
+                "Source Path",
+                values if values else [''],
+                key=f'{template_variable}_source_selection',
+                format_func=lambda v, m=display_map: m.get(v, v),
+                label_visibility="collapsed",
+            )
+            formatted_variable_value = f'`{variable_value}`'
+
+        cols[3].markdown(formatted_variable_value)
+        # selected_table = st.session_state.get(f'{template_variable}_source_table', const.DATABASE_TABLES[0])
+        # columns_of_table = table_columns[selected_table]["columns"]
+        # cols[2].selectbox(
+        #     "Source Column",
+        #     columns_of_table,
+        #     key=f'{template_variable}_source_column',
+        #     label_visibility="collapsed",
+        # )
+        # cols[3].text_input(
+        #     "Additional Details",
+        #     key=f'{template_variable}_additional_details',
+        #     label_visibility="collapsed",
+        # )
+
+
+def show_bulk_editor():
+    variable_map_json = dict(st.session_state)
+    st.text_area('Bulk edit variable mapper', value=json.dumps(variable_map_json, indent=4))
+
+
+
 def map_variables_tab():
-    st.header('Map Variables')
+    map_variables_header_cols = st.columns([10, 1])
+    # map_variables_header_cols[0].markdown('### Map Variables')
+    bulk_editor = map_variables_header_cols[1].checkbox('Bulk Edit')
     template_variables = [i[2:-2] for i in re.findall(r'\{\{[\w _ \d]+\}\}', st.session_state['template_html'])]
     table_columns = {}
 
@@ -61,38 +128,34 @@ def map_variables_tab():
             "dtype": df['type'].to_list()
         }
     
-    header_cols = st.columns([2, 2, 2, 2])
-    header_cols[0].markdown("**Template Variable**")
-    header_cols[1].markdown("**Source Table**")
-    header_cols[2].markdown("**Source Column**")
-    header_cols[3].markdown("**Additional Details**")
-
-    for template_variable in template_variables:
-        cols = st.columns([2, 2, 2, 2])
-        cols[0].markdown(f'##### `{template_variable}`', unsafe_allow_html=True)
-        cols[1].selectbox(
-            "Source Table",
-            const.DATABASE_TABLES,
-            key=f'{template_variable}_source_table',
-            label_visibility="collapsed",
-        )
-        selected_table = st.session_state.get(f'{template_variable}_source_table', const.DATABASE_TABLES[0])
-        columns_of_table = table_columns[selected_table]["columns"]
-        cols[2].selectbox(
-            "Source Column",
-            columns_of_table,
-            key=f'{template_variable}_source_column',
-            label_visibility="collapsed",
-        )
-        cols[3].text_input(
-            "Additional Details",
-            key=f'{template_variable}_additional_details',
-            label_visibility="collapsed",
-        )
+    # build flattened list of node options (value -> label) with icon markers
+    def _flatten(nodes_list, prefix=None):
+        out = []
+        for n in nodes_list:
+            has_children = 'children' in n and isinstance(n['children'], list) and len(n['children']) > 0
+            part = n.get('label', n.get('value', ''))
+            full = f"{prefix}.{part}" if prefix else part
+            out.append({
+                'label': n.get('label', ''),
+                'value': full,
+                'has_children': has_children
+            })
+            if has_children:
+                out.extend(_flatten(n['children'], prefix=full))
+        return out
+    
+    flat = _flatten(nodes)
+    if not bulk_editor:
+        show_tabular_col_mapper(flat, template_variables)
+    else:
+        show_bulk_editor()
 
 
 def view_and_save_tab():
     st.header('View and save')
+
+    return_select = tree_select(nodes)
+    st.write(return_select)
 
 
 

@@ -7,3 +7,5 @@ DATABASE_TABLES = [
     "material_master",
     "address_master"
 ]
+
+DB_PATH = "database/transport_doc_generator.db"
